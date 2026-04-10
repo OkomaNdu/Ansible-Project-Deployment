@@ -1,0 +1,4 @@
+version: 1.0.0 
+location: /home/ndu/DevOps-Project/Configuration-Management-with-Ansible/nodejs-app 
+linux_name: ndu
+user_home_dir: /home/{{linux_name}}
