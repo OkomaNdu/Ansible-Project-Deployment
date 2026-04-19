@@ -1,0 +1,71 @@
+---
+- name: Install Docker
+  hosts: tag_Name_prod_server
+  become: yes
+  tasks: 
+    - name: Install Docker
+      yum:
+        name: docker
+        update_cache: yes
+        state: present
+    - name: Start docker daemon
+      systemd:
+        name: docker
+        state: started
+
+- name: Create new Linux user
+  hosts: tag_Name_prod_server
+  become: yes
+  vars_files:
+    - project-vars 
+  tasks:
+    - name: Create new linux user
+      user:
+        name: ndu
+        groups: "{{ user_groups }}"
+
+- name: Install Docker-compose
+  hosts: tag_Name_prod_server
+  become: yes
+  become_user: ndu
+  tasks:
+    - name: Create docker-compose directory
+      file:
+        path: ~/.docker/cli-plugins
+        state: directory
+    - name: Get architecture of remote machine
+      shell: uname -m
+      register: remote_arch
+    - name: Install docker-compose
+      get_url: 
+        url: " https://github.com/docker/compose/releases/latest/download/docker-compose-linux-{{ remote_arch.stdout }}"
+        dest: ~/.docker/cli-plugins/docker-compose
+        mode: +x
+
+
+
+- name: Start docker containers
+  hosts: tag_Name_prod_server
+  become: yes
+  become_user: ndu
+  vars_files:
+    - project-vars
+  tasks:
+    - name: Copy docker compose
+      copy:
+        src: /home/ndu/DevOps-Project/Configuration-Management-with-Ansible/Java-mysql-ansible-project/docker-compose-full.yaml
+        dest: /home/ndu/docker-compose.yaml
+    - name: Docker login
+      docker_login:
+        username: ndubuisip
+        password: "{{docker_password}}" 
+    - name: Start containers from compose
+      community.docker.docker_compose_v2:
+        project_src: /home/ndu
+        
+
+
+
+
+
+
