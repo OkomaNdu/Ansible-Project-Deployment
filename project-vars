@@ -3,5 +3,5 @@ location: /home/ndu/DevOps-Project/Configuration-Management-with-Ansible/nodejs-
 linux_name: ndu
 user_home_dir: /home/{{linux_name}}
 
-docker_password: Ndubuisia0
-user_groups: adm,docker
+docker_password: xxxxx
+user_groups: admin,docker
