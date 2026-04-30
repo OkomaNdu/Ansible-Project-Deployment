@@ -39,79 +39,46 @@ DigitalOcean Droplets (Nexus, Node.js) are targeted directly via static inventor
 
 ```
 ┌──────────────────────────────────────────────────────────────────────────────────────────┐
-│                              CONTROL NODE  (Local Machine)                               │
-│                                                                                          │
-│  ┌──────────────────────────────┐      ┌──────────────────────────────────────────────┐ │
-│  │     TERRAFORM  (Stage 1)     │      │           ANSIBLE  (Stage 2)                 │ │
-│  │──────────────────────────────│      │──────────────────────────────────────────────│ │
-│  │ terraform-learn/             │      │ ansible.cfg  (ec2-user, id_rsa, aws_ec2)     │ │
-│  │  ├── providers.tf            │      │                                              │ │
-│  │  │    └─ AWS ~> 6.0          │      │ Inventory                                    │ │
-│  │  ├── main.tf                 │      │  ├── hosts  (static: nexus, docker servers)  │ │
-│  │  │    ├── VPC + subnet       │      │  └── inventory_aws_ec2.yaml (dynamic: tags)  │ │
-│  │  │    ├── Internet Gateway   │      │                                              │ │
-│  │  │    ├── Security Group     │      │ Playbooks                                   │ │
-│  │  │    │    ├── SSH:22 (my IP)│      │  ├── deploy-nexus.yaml                       │ │
-│  │  │    │    └── TCP:8080 (all)│      │  ├── deploy-node.yaml                        │ │
-│  │  │    └── EC2 (Amazon Linux) │      │  ├── deploy-docker-ec2-user.yaml             │ │
-│  │  └── entry-script.sh        │      │  ├── deploy-docker-new-user.yaml             │ │
-│  │       (user_data bootstrap)  │      │  ├── deploy-docker-with-roles.yaml           │ │
-│  │       ├── yum install docker │      │  └── deploy-to-K8s.yaml                     │ │
-│  │       ├── systemctl start    │      │                                              │ │
-│  │       └── usermod docker grp │      │ Roles                                       │ │
-│  │                              │      │  ├── create_user/                            │ │
-│  │ Terraform/ (EKS)             │      │  └── state_containers/                      │ │
-│  │  ├── providers.tf            │      │      └── files/docker-compose.yaml          │ │
-│  │  │    └─ AWS v5.20.1         │      │                                              │ │
-│  │  ├── vpc.tf                  │      │ project-vars                                 │ │
-│  │  │    └─ module vpc v5.1.2   │      │  (version, linux_name, user_groups,          │ │
-│  │  └── eks-cluster.tf          │      │   docker_password)                           │ │
-│  │       └─ module eks v19.17.2 │      └──────────────────────────────────────────────┘ │
-│  └──────────────┬───────────────┘                         │                             │
-└─────────────────┼───────────────────────────────────────  │ ─────────────────────────── ┘
-                  │ terraform apply                          │ SSH (port 22) / kubectl
-                  │                                         │
-                  ▼                           ├──────────────────────────┬─────────────────────────┐
-┌─────────────────────────────────────────────┐  │                          │                         │
-│        AWS CLOUD  (eu-central-1)            │  │                          │                         │
-│                                             │  ▼                          ▼                         ▼
-│  ┌──────────────────────────────────────┐   │  ┌──────────────────┐  ┌─────────────────────────────┐  ┌──────────────────────────┐
-│  │          myapp-vpc  (VPC)            │   │  │  DIGITALOCEAN    │  │  AWS CLOUD  (ca-central-1)  │  │   AWS EKS CLUSTER        │
-│  │  ┌────────────┐  ┌────────────────┐  │   │  │  (static inv.)   │  │  Provisioned by             │  │   myapp-eks-cluster      │
-│  │  │  Public    │  │  Private       │  │   │  │──────────────────│  │  terraform-learn/            │  │  Provisioned by          │
-│  │  │  Subnets   │  │  Subnets       │  │   │  │ nexus_server     │  │─────────────────────────────│  │  Terraform/ (EKS)        │
-│  │  │  (ELB)     │  │  (internal-ELB)│  │   │  │ Ubuntu / root    │  │  docker_server              │  │──────────────────────────│
-│  │  └────────────┘  └───────┬────────┘  │   │  │ 165.245.238.35   │  │  Amazon Linux 2 / ec2-user  │  │  K8s version: 1.27       │
-│  │         ▲                │           │   │  │──────────────────│  │  3.96.159.160               │  │  Node group: dev         │
-│  │         │                ▼           │   │  │ Nexus 3          │  │─────────────────────────────│  │  ├── 3x t2.small nodes   │
-│  │  ┌──────────────────────────────┐    │   │  │ /opt/nexus       │  │  Docker pre-installed via   │  │                          │
-│  │  │      NAT Gateway             │    │   │  │ OS user: nexus   │  │  entry-script.sh (user_data)│  │  Namespace: my-app       │
-│  │  └──────────────────────────────┘    │   │  │ (least priv.)    │  │                             │  │  ┌────────────────────┐  │
-│  │                                      │   │  │                  │  │  Ansible adds:              │  │  │ nginx Deployment   │  │
-│  │  ┌──────────────────────────────┐    │   │  │ Node.js server   │  │  ├─ docker-compose v2       │  │  │ (nginx-config.yaml │  │
-│  │  │   EKS Managed Node Group     │    │   │  │ Ubuntu / root    │  │  ├─ OS user: ndu            │  │  │  applied by        │  │
-│  │  │   3x t2.small  (in private   │◄───┘   │  │ 143.198.39.191   │  │  ├─ java-app  :8080        │  │  │  Ansible)          │  │
-│  │  │   subnets, tagged for K8s)   │        │  │ OS user: ndu     │  │  ├─ mysql     :3306        │  │  └────────────────────┘  │
-│  │  └──────────────────────────────┘        │  └──────────────────┘  │  └─ phpmyadmin:8083        │  │                          │
-│  └──────────────────────────────────────────┘                         └─────────────────────────────┘  │  Managed via:            │
-│                                                                                                         │  kubernetes.core.k8s     │
-│                                                                                                         └──────────────────────────┘
-                                                          │  pulls images
-                                                          ▼
-                                              ┌───────────────────────────┐
-                                              │    CONTAINER REGISTRIES   │
-                                              │  ┌─────────────────────┐  │
-                                              │  │  Docker Hub         │  │
-                                              │  │  ndubuisip/         │  │
-                                              │  │  demo-app:          │  │
-                                              │  │  java-maven-3.0     │  │
-                                              │  └─────────────────────┘  │
-                                              │  ┌─────────────────────┐  │
-                                              │  │  AWS ECR            │  │
-                                              │  │  (configurable via  │  │
-                                              │  │   role defaults)    │  │
-                                              │  └─────────────────────┘  │
-                                              └───────────────────────────┘
+│                             CONTROL NODE  (Local Machine)                                │
+├────────────────────────────────┬────────────────────────────────┬────────────────────────┤
+│  TRACK A  EC2 + Docker         │  TRACK B  EKS + Kubernetes     │  TRACK C  DO Direct    │
+├────────────────────────────────┼────────────────────────────────┼────────────────────────┤
+│ [1] TERRAFORM                  │ [1] TERRAFORM                  │ ANSIBLE only           │
+│ terraform-learn/               │ Terraform/ (EKS)               │ (no Terraform)         │
+│  ├─ main.tf                    │  ├─ vpc.tf                     │                        │
+│  │  ├─ VPC + Internet GW       │  │  └─ vpc module v5.1.2      │ hosts (static inv.)    │
+│  │  ├─ Security Group          │  └─ eks-cluster.tf             │  ├─ nexus_server        │
+│  │  │  ├─ SSH:22  (my IP)      │     └─ eks module v19.17.2    │  │  Ubuntu / root        │
+│  │  │  └─ TCP:8080 (public)    │                                │  │  165.245.238.35      │
+│  │  └─ EC2: Amazon Linux 2     │ [2] ANSIBLE                    │  └─ docker_server(EC2) │
+│  └─ entry-script.sh            │ deploy-to-K8s.yaml             │                        │
+│     ├─ yum install docker      │  ├─ namespace: my-app          │ deploy-nexus.yaml      │
+│     ├─ systemctl start docker  │  └─ nginx Deployment           │  └─ Nexus 3 install    │
+│     └─ usermod -aG docker      │                                │                        │
+│                                │                                │ deploy-node.yaml       │
+│ [2] ANSIBLE                    │                                │  └─ Node.js deploy     │
+│ deploy-docker-ec2-user.yaml    │                                │     143.198.39.191     │
+│ deploy-docker-new-user.yaml    │                                │                        │
+│ deploy-docker-with-roles.yaml  │                                │                        │
+│  ├─ docker-compose v2          │                                │                        │
+│  ├─ create OS user: ndu        │                                │                        │
+│  └─ java / mysql / phpmyadmin  │                                │                        │
+├────────────────────────────────┼────────────────────────────────┼────────────────────────┤
+│ AWS EC2  (ca-central-1)        │ AWS EKS  (eu-central-1)        │ DigitalOcean Droplets  │
+│ 3.96.159.160  /  ec2-user      │ myapp-eks-cluster  K8s 1.27    │  165.245.238.35        │
+│  ├─ java-app    :8080          │  └─ 3x t2.small (1-3 nodes)   │  └─ Nexus 3            │
+│  ├─ mysql       :3306          │ Namespace: my-app              │                        │
+│  └─ phpmyadmin  :8083          │  └─ nginx Deployment           │  143.198.39.191        │
+│                                │                                │  └─ Node.js server     │
+└────────────────────────────────┴────────────────────────────────┴────────────────────────┘
+
+                    Track A — docker_server pulls images from:
+                    ┌───────────────────────────────────────┐
+                    │  Docker Hub:  ndubuisip/demo-app       │
+                    │               java-maven-3.0           │
+                    │  AWS ECR:     configurable via         │
+                    │               state_containers role    │
+                    └───────────────────────────────────────┘
 ```
 
 ### Two-Stage Automation Pipeline
